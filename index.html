@@ -588,7 +588,7 @@ function friendCard(f){
   return `<div class="card friend"><div class="av">${f.av}</div>
     <div class="grow"><b>${esc(f.user)}</b> <span class="small muted">· ${esc(f.pet)}（${esc(f.breed)} ${ageText(addDays(iso(today()), -f.age))}）</span>
       <div class="small muted">📍 ${esc(f.city)}${f.city === S.me.city ? ` · ${f.dist}km` : ''}${f.bio ? ' · ' + esc(f.bio) : ''}</div>
-      <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">${f.reasons.map(r => `<span class="pill orange">${esc(r)}</span>`).join('')}${f.tags.map(t => `<span class="pill">${esc(t)}</span>`).join('')}</div></div>
+      <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">${f.reasons.map(r => `<span class="pill orange">${esc(r)}</span>`).join('')}${f.tags.filter(t => !f.reasons.includes(t)).map(t => `<span class="pill">${esc(t)}</span>`).join('')}</div></div>
     <div><div class="match">${f.score}%<small>匹配度</small></div><button class="btn sm" style="margin-top:6px" onclick="openChat('${f.id}')">打招呼</button></div></div>`;
 }
 
