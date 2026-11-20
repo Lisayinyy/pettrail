@@ -227,10 +227,13 @@ nav.tabs button.on .i{filter:none;opacity:1;transform:translateY(-1px) scale(1.0
 const DAY = 864e5;
 const today = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
 const iso = d => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`; };
-const ago = n => iso(today().getTime() - n*DAY);
-const addDays = (s, n) => iso(new Date(s).getTime() + n*DAY);
-const diffDays = (a, b = iso(today())) => Math.round((new Date(a) - new Date(b)) / DAY);
-const fmtMD = s => { const d = new Date(s); return `${d.getMonth()+1}月${d.getDate()}日`; };
+// 'YYYY-MM-DD' is a calendar day in the visitor's own timezone. `new Date('YYYY-MM-DD')` parses it as UTC
+// midnight, which is the previous day anywhere west of Greenwich, so every derived date came out a day early.
+const parse = s => { const [y, m, d] = String(s).split('-').map(Number); return new Date(y, m - 1, d); };
+const addDays = (s, n) => { const d = parse(s); d.setDate(d.getDate() + n); return iso(d); };
+const ago = n => addDays(iso(today()), -n);
+const diffDays = (a, b = iso(today())) => Math.round((parse(a) - parse(b)) / DAY);
+const fmtMD = s => { const d = parse(s); return `${d.getMonth()+1}月${d.getDate()}日`; };
 const uid = () => Math.random().toString(36).slice(2, 9);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const $ = s => document.querySelector(s);
@@ -318,9 +321,25 @@ const EVENTS = [
   { id:'e7', city:'成都·高新区', d:7, title:'猫咖撸猫 + 领养日', place:'猫咖·喵星球', n:12, icon:'☕' },
 ];
 
-let S;
-try { S = JSON.parse(localStorage.getItem(KEY)) || seed(); } catch { S = seed(); }
-const save = () => localStorage.setItem(KEY, JSON.stringify(S));
+// Saved state can be missing, truncated, or written by an older build. Anything that is not the expected
+// shape falls back to a default instead of leaving a page that throws on every render.
+function load(){
+  let s;
+  try { s = JSON.parse(localStorage.getItem(KEY)); } catch { /* unreadable storage */ }
+  if (!s || !Array.isArray(s.pets) || !s.pets.length) return seed();
+  const list = k => Array.isArray(s[k]) ? s[k] : [];
+  return {
+    me: { name:'小鱼干铲屎官', city:CITIES[0], ...(s.me && typeof s.me === 'object' ? s.me : {}) },
+    current: s.current, pets: s.pets,
+    weights: list('weights'), vaccines: list('vaccines'), deworms: list('deworms'), visits: list('visits'), diaries: list('diaries'),
+    posts: list('posts').map(p => ({ ...p, comments: Array.isArray(p.comments) ? p.comments : [] })),
+    chats: s.chats && typeof s.chats === 'object' ? s.chats : {},
+    joined: list('joined'),
+  };
+}
+let S = load();
+// Private browsing and a full quota make setItem throw; the session keeps working in memory.
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch { /* not persisted */ } };
 function resetDemo(){ if (!confirm('确定重置为演示数据？本地新增的内容会被清除')) return; S = seed(); save(); render(); toast('已重置演示数据'); }
 
 const UI = { tab:'home', hTab:'weight', tlFilter:'all', topic:'全部', fFilter:'推荐' };
@@ -335,7 +354,7 @@ function reminders(p = pet()){
   const v = of('vaccines', p.id)[0];
   if (v && v.next) list.push({ type:'vaccine', icon:'💉', title:`疫苗：${v.name.replace(/第\d针|（.*）/g,'').trim()} 加强`, due:v.next });
   if (!v) list.push({ type:'vaccine', icon:'💉', title:'还没有疫苗记录，建议补充', due:iso(today()) });
-  latest('deworms', r => r.kind === '体内' ? 'in' : r.kind === '体外' ? 'out' : 'both').forEach(d => list.push({ type:'deworm', icon:'🐛', title:`${d.kind}驱虫（${d.drug}）`, due:d.next }));
+  latest('deworms', r => r.kind === '体内' ? 'in' : r.kind === '体外' ? 'out' : 'both').forEach(d => d.next && list.push({ type:'deworm', icon:'🐛', title:`${d.kind}驱虫（${d.drug}）`, due:d.next }));
   const w = of('weights', p.id)[0];
   const wd = w ? addDays(w.date, 30) : iso(today());
   list.push({ type:'weight', icon:'⚖️', title:'月度称重', due:wd });
@@ -450,7 +469,7 @@ health(){
   } else if (UI.hTab === 'deworm') {
     const ds = of('deworms');
     body = `<div class="card"><h2>驱虫记录 <button class="btn sm" onclick="openRecord('deworm')">＋ 记录</button></h2>
-      ${ds.map(d => item('🐛','var(--yellow-soft)', `${esc(d.kind)}驱虫 · ${esc(d.drug)}`, d.date, `<div class="small">下次 ${d.next}</div>`, 'deworms', d.id)).join('') || empty('还没有驱虫记录')}
+      ${ds.map(d => item('🐛','var(--yellow-soft)', `${esc(d.kind)}驱虫 · ${esc(d.drug)}`, d.date, d.next ? `<div class="small">下次 ${d.next}</div>` : '', 'deworms', d.id)).join('') || empty('还没有驱虫记录')}
       <div class="tips">💡 常规建议：体内驱虫每 3 个月一次，体外驱虫每月一次；常外出的狗狗需更频繁。</div></div>`;
   } else {
     const vs = of('visits');
@@ -473,7 +492,7 @@ timeline(){
     ...of('diaries').map(d => ({ date:d.date, type:d.milestone ? 'milestone' : 'daily', icon:d.milestone ? '⭐' : '📸', title:d.text, pic:d.pic, dot:d.milestone ? 'var(--pri)' : 'var(--purple)' })),
   ];
   // auto milestones: birthdays, 100 days together
-  const bd = new Date(p.birth);
+  const bd = parse(p.birth);
   for (let y = 1; y < 25; y++) { const d = iso(new Date(bd.getFullYear() + y, bd.getMonth(), bd.getDate())); if (d > iso(today())) break; ev.push({ date:d, type:'milestone', icon:'🎉', title:`${p.name} ${y} 岁生日快乐！`, dot:'var(--pri)' }); }
   [100, 365, 500, 1000].forEach(n => { const d = addDays(p.home, n); if (d <= iso(today())) ev.push({ date:d, type:'milestone', icon:'💛', title:`相伴第 ${n} 天`, dot:'var(--pri)' }); });
   const filtered = ev.filter(e => UI.tlFilter === 'all' || e.type === UI.tlFilter).sort((a, b) => a.date < b.date ? 1 : -1);
@@ -513,7 +532,7 @@ friends(){
   <div class="filter-row">${['推荐','同品种','同城','约遛','新手互助'].map(t => `<button class="${UI.fFilter === t ? 'on' : ''}" onclick="UI.fFilter='${t}';render()">${t}</button>`).join('')}</div>
   ${list.filter(f => UI.fFilter === '推荐' ? true : UI.fFilter === '同品种' ? f.breed === pet().breed : UI.fFilter === '同城' ? f.city === S.me.city : UI.fFilter === '约遛' ? f.tags.includes('约遛') : f.tags.includes('新手')).map(friendCard).join('') || empty('该条件下暂无宠友，换个筛选试试')}
   <div class="sec-title">🎪 同城活动</div>
-  ${events.map(e => `<div class="card event"><div class="date"><b>${new Date(addDays(iso(today()), e.d)).getDate()}</b>${new Date(addDays(iso(today()), e.d)).getMonth()+1}月</div>
+  ${events.map(e => `<div class="card event"><div class="date"><b>${parse(addDays(iso(today()), e.d)).getDate()}</b>${parse(addDays(iso(today()), e.d)).getMonth()+1}月</div>
     <div class="grow"><b>${e.icon} ${esc(e.title)}</b><div class="small muted">📍 ${esc(e.place)} · ${e.n + (S.joined.includes(e.id) ? 1 : 0)} 人报名</div></div>
     <button class="btn sm ${S.joined.includes(e.id) ? 'gray' : ''}" onclick="joinEvent('${e.id}')">${S.joined.includes(e.id) ? '已报名' : '报名'}</button></div>`).join('') || empty('当前城市暂无活动')}`;
 },
@@ -526,7 +545,6 @@ community(){
     <div class="head"><div class="av">${p.av}</div><div class="grow"><b>${esc(p.user)}</b><div class="small muted">${esc(p.city)} · ${esc(p.time)}</div></div>${p.petName ? `<span class="pill orange">${esc(p.petName)}</span>` : ''}</div>
     <div class="body"><span class="topic">#${esc(p.topic)}</span>${esc(p.text)}</div>
     ${p.pics?.length ? `<div class="imgs">${p.pics.map(x => `<div>${x}</div>`).join('')}</div>` : ''}
-    ${p.card ? p.card : ''}
     <div class="acts"><button class="${p.liked ? 'liked' : ''}" onclick="like('${p.id}')">${p.liked ? '❤️' : '🤍'} ${p.likes}</button><button onclick="comment('${p.id}')">💬 ${p.comments.length}</button><button onclick="toast('链接已复制，快分享给朋友吧')">↗ 分享</button></div>
     ${p.comments.length ? `<div class="comments">${p.comments.map(c => `<p><b>${esc(c.u)}：</b>${esc(c.t)}</p>`).join('')}</div>` : ''}
   </div>`).join('') || empty('这个话题还没有内容，来发第一条吧')}`;
@@ -602,7 +620,8 @@ function modal(html){
   const first = m.querySelector('input,textarea'); first && setTimeout(() => first.focus(), 50);
 }
 function closeModal(){ $('#mask')?.remove(); }
-const head = t => `<h3>${t}<button onclick="closeModal()">✕</button></h3>`;
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+const head = t => `<h3>${t}<button onclick="closeModal()" aria-label="关闭">✕</button></h3>`;
 const fld = (label, inner) => `<div class="field"><label>${label}</label>${inner}</div>`;
 
 function openRecord(type){
@@ -650,6 +669,8 @@ function openPetForm(id){
 }
 function savePet(id){
   const name = v('p_name'); if (!name) return toast('给它取个名字吧');
+  if (!v('p_birth') || !v('p_home')) return toast('请填写生日和到家日');
+  if (v('p_birth') > iso(today())) return toast('生日不能晚于今天');
   const data = { name, species:v('p_sp'), gender:v('p_g'), breed:v('p_breed') || v('p_sp'), birth:v('p_birth'), home:v('p_home'), avatar:document.querySelector('#p_av .on')?.textContent || SPECIES[v('p_sp')], neutered:document.getElementById('p_neu').checked };
   if (id) Object.assign(S.pets.find(p => p.id === id), data);
   else { const n = { id:uid(), ...data }; S.pets.push(n); S.current = n.id; }
@@ -694,7 +715,7 @@ function openChat(fid){
   const draw = () => `${head(`${f.av} ${esc(f.user)}`)}<div class="small muted" style="margin-top:-8px;margin-bottom:10px">📍 ${esc(f.city)} · ${esc(f.pet)}（${esc(f.breed)}）</div>
     <div class="chat" id="chatBox">${S.chats[fid].map(m => `<div class="bubble ${m.me ? 'me' : ''}">${esc(m.t)}</div>`).join('')}</div>
     <div class="filter-row">${['周末一起遛弯吗？','你家用的什么粮？','附近有靠谱的医院推荐吗？'].map(q => `<button onclick="sendChat('${fid}',this.textContent)">${q}</button>`).join('')}</div>
-    <div class="row"><input id="chatIn" class="grow" style="border:1px solid var(--line);border-radius:12px;padding:10px" placeholder="说点什么…" onkeydown="if(event.key==='Enter')sendChat('${fid}',this.value)"><button class="btn" onclick="sendChat('${fid}',document.getElementById('chatIn').value)">发送</button></div>`;
+    <div class="row"><input id="chatIn" class="grow" style="border:1px solid var(--line);border-radius:12px;padding:10px" placeholder="说点什么…" onkeydown="if(event.key==='Enter'&&!event.isComposing)sendChat('${fid}',this.value)"><button class="btn" onclick="sendChat('${fid}',document.getElementById('chatIn').value)">发送</button></div>`;
   modal(draw()); window._chatDraw = draw;
 }
 function sendChat(fid, t){
