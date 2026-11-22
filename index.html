@@ -503,7 +503,7 @@ timeline(){
   <div class="report">
     <div style="font-size:12px;opacity:.9">✨ AI 成长报告</div>
     <div style="font-size:17px;font-weight:700;margin-top:2px">${esc(p.name)} 的成长故事</div>
-    <div class="small" style="opacity:.95;margin-top:4px">${growthSummary(p)}</div>
+    <div class="small" style="opacity:.95;margin-top:4px">${esc(growthSummary(p))}</div>
     <div class="g">
       <div><b>${together}</b>相伴天数</div>
       <div><b>${ws.length >= 2 ? (ws[0].value / ws[ws.length-1].value).toFixed(1) + 'x' : '--'}</b>体重变化</div>
