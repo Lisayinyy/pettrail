@@ -326,13 +326,19 @@ const EVENTS = [
 function load(){
   let s;
   try { s = JSON.parse(localStorage.getItem(KEY)); } catch { /* unreadable storage */ }
-  if (!s || !Array.isArray(s.pets) || !s.pets.length) return seed();
-  const list = k => Array.isArray(s[k]) ? s[k] : [];
+  // Keep what the views can draw (an object, with a calendar day wherever a date is read) and drop the rest,
+  // so one bad entry costs that entry instead of the whole page.
+  const day = v => typeof v === 'string' && /^\d{4,6}-\d{2}-\d{2}$/.test(v);
+  const list = k => Array.isArray(s?.[k]) ? s[k] : [];
+  const rows = (k, ok = r => day(r.date)) => list(k).filter(r => r && typeof r === 'object' && ok(r));
+  const pets = rows('pets', p => day(p.birth) && day(p.home));
+  if (!pets.length) return seed();
+  const me = s.me && typeof s.me === 'object' ? s.me : {};
   return {
-    me: { name:'小鱼干铲屎官', city:CITIES[0], ...(s.me && typeof s.me === 'object' ? s.me : {}) },
-    current: s.current, pets: s.pets,
-    weights: list('weights'), vaccines: list('vaccines'), deworms: list('deworms'), visits: list('visits'), diaries: list('diaries'),
-    posts: list('posts').map(p => ({ ...p, comments: Array.isArray(p.comments) ? p.comments : [] })),
+    me: { name:'小鱼干铲屎官', ...me, city: typeof me.city === 'string' ? me.city : CITIES[0] },
+    current: s.current, pets,
+    weights: rows('weights'), vaccines: rows('vaccines'), deworms: rows('deworms'), visits: rows('visits'), diaries: rows('diaries'),
+    posts: rows('posts', () => true).map(p => ({ ...p, comments: Array.isArray(p.comments) ? p.comments : [] })),
     chats: s.chats && typeof s.chats === 'object' ? s.chats : {},
     joined: list('joined'),
   };
